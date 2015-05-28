@@ -33,4 +33,8 @@ public interface IMixinWorldProvider {
     SpongeConfig<SpongeConfig.DimensionConfig> getDimensionConfig();
 
     int getAverageGroundLevel();
+
+    int getHeight();
+
+    int getBuildHeight();
 }

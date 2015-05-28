@@ -84,7 +84,7 @@ public class Sponge {
 
     @Inject
     public Sponge(Injector injector, Game game, Logger logger,
-            @Named("Sponge") PluginContainer plugin, @Named("Minecraft") PluginContainer minecraftPlugin) {
+            @Named(Sponge.ECOSYSTEM_NAME) PluginContainer plugin, @Named("Minecraft") PluginContainer minecraftPlugin) {
 
         checkState(instance == null, "Sponge was already initialized");
         instance = this;
