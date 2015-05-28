@@ -65,7 +65,7 @@ public abstract class MixinTileEntity implements TileEntity, IMixinTileEntity {
         container.set(of("x"), this.getPos().getX());
         container.set(of("y"), this.getPos().getY());
         container.set(of("z"), this.getPos().getZ());
-        container.set(of("tileType"), net.minecraft.tileentity.TileEntity.classToNameMap.get(this.getClass()));
+        container.set(of("tileType"), this.getClass().getSimpleName());
         return container;
     }
 
