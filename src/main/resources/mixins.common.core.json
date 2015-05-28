@@ -173,6 +173,7 @@
         "world.MixinWorldServerMulti",
         "world.MixinWorldSettings",
         "world.MixinWorldType",
+        "world.MixinSaveHandler",
         "world.biome.MixinBiomeGenBase",
         "world.difficulty.MixinEnumDifficulty",
         "world.extent.MixinExtent",

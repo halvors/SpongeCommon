@@ -64,6 +64,7 @@ import javax.inject.Singleton;
 
 @Singleton
 public class Sponge {
+    public static final String ECOSYSTEM_NAME = "Sponge";
 
     @Nullable
     private static Sponge instance;

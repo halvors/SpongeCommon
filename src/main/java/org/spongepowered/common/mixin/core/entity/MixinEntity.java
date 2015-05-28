@@ -29,6 +29,7 @@ import static org.spongepowered.api.data.DataQuery.of;
 import com.flowpowered.math.vector.Vector3d;
 import com.google.common.base.Optional;
 import net.minecraft.entity.DataWatcher;
+import net.minecraft.entity.EntityList;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.network.play.server.S08PacketPlayerPosLook;
@@ -516,8 +517,11 @@ public abstract class MixinEntity implements Entity, IMixinEntity {
     @Override
     public DataContainer toContainer() {
         DataContainer container = new MemoryDataContainer();
-        container.set(of("World"), this.getWorld().getUniqueId().toString());
-        // TODO do stuff with more container information
+        container.set(of("world"), ((World) this.worldObj).getUniqueId().toString());
+        container.set(of("x"), this.getLocation().getX());
+        container.set(of("y"), this.getLocation().getY());
+        container.set(of("z"), this.getLocation().getZ());
+        container.set(of("entityType"), EntityList.getStringFromID(((net.minecraft.entity.Entity) (Object) this).getEntityId()));
         return container;
     }
 }
