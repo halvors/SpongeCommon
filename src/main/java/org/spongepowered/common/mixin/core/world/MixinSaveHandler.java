@@ -26,22 +26,24 @@ package org.spongepowered.common.mixin.core.world;
 
 import net.minecraft.nbt.CompressedStreamTools;
 import net.minecraft.nbt.NBTTagCompound;
-import net.minecraft.world.MinecraftException;
+import net.minecraft.world.storage.SaveHandler;
 import net.minecraft.world.storage.WorldInfo;
 import org.spongepowered.api.util.annotation.NonnullByDefault;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.LocalCapture;
 import org.spongepowered.common.Sponge;
 import org.spongepowered.common.interfaces.IMixinWorldInfo;
+import org.spongepowered.common.world.DimensionManager;
 
-import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-
-import javax.annotation.Nullable;
 
 @NonnullByDefault
 @Mixin(net.minecraft.world.storage.SaveHandler.class)
@@ -50,132 +52,68 @@ public abstract class MixinSaveHandler {
     @Shadow private File worldDirectory;
     @Shadow private long initializationTime;
 
-    @Overwrite
-    public void checkSessionLock() throws MinecraftException {
-        try {
-            File file1 = new File(this.worldDirectory, "session.lock");
-            DataInputStream datainputstream = new DataInputStream(new FileInputStream(file1));
+    @ModifyArg(method = "checkSessionLock", at = @At(value = "INVOKE",target = "Lnet/minecraft/world/MinecraftException;<init>(Ljava/lang/String;)"
+            + "V", ordinal = 0))
+    public String modifyMinecraftExceptionOutputIfNotInitializationTime(String message) {
+        return "The save folder for world " + this.worldDirectory + " is being accessed from another location, aborting";
+    }
 
-            try {
-                if (datainputstream.readLong() != this.initializationTime) {
-                    throw new MinecraftException("The save folder for world " + this.worldDirectory
-                            + " is being accessed from another location, aborting");
-                }
-            } finally {
-                datainputstream.close();
+    @ModifyArg(method = "checkSessionLock", at = @At(value = "INVOKE",target = "Lnet/minecraft/world/MinecraftException;<init>(Ljava/lang/String;)"
+            + "V", ordinal = 1))
+    public String modifyMinecraftExceptionOutputIfIOException(String message) {
+        return "Failed to check session lock for world " + this.worldDirectory + ", aborting";
+    }
+
+    @Inject(method = "loadWorldInfo", at = @At(value = "RETURN", ordinal = 0), locals = LocalCapture.PRINT)
+    public void onLoadWorldInfoBeforeReturn(CallbackInfo ci, File file1, NBTTagCompound nbttagcompound, NBTTagCompound nbttagcompound1, WorldInfo
+            worldInfo) throws IOException {
+        loadDimensionAndOtherData((SaveHandler) (Object) this, worldInfo, nbttagcompound);
+        loadSpongeDatData(worldInfo);
+    }
+
+    @Inject(method = "saveWorldInfoWithPlayer", at = @At(value = "INVOKE", target = "Lnet/minecraft/nbt/NBTTagCompound;setTag(Ljava/lang/String;"
+            + "Lnet/minecraft/nbt/NBTBase;)V"), locals = LocalCapture.PRINT)
+    public void onSaveWorldInfoWithPlayerAfterTagSet(WorldInfo worldInformation, NBTTagCompound tagCompound, NBTTagCompound nbttagcompound1,
+            NBTTagCompound nbttagcompound2, CallbackInfo ci) {
+        saveDimensionAndOtherData((SaveHandler) (Object) this, worldInformation, nbttagcompound2);
+    }
+
+    @Inject(method = "saveWorldInfoWithPlayer", at = @At("RETURN"))
+    public void onSaveWorldInfoWithPlayerEnd(WorldInfo worldInformation, NBTTagCompound tagCompound, CallbackInfo ci) {
+        saveSpongeDatData(worldInformation);
+    }
+
+    @Inject(method = "saveWorldInfo", at = @At(value = "INVOKE", target = "Lnet/minecraft/nbt/NBTTagCompound;setTag(Ljava/lang/String;"
+            + "Lnet/minecraft/nbt/NBTBase;)V"), locals = LocalCapture.PRINT)
+    public void onSaveWorldInfoAfterTagSet(WorldInfo worldInformation, NBTTagCompound nbttagcompound, NBTTagCompound nbttagcompound1, CallbackInfo ci) {
+        saveDimensionAndOtherData((SaveHandler) (Object) this, worldInformation, nbttagcompound1);
+    }
+
+    @Inject(method = "saveWorldInfo", at = @At("RETURN"))
+    public void onSaveWorldInfoEnd(WorldInfo worldInformation, CallbackInfo ci) {
+        saveSpongeDatData(worldInformation);
+    }
+
+    private void loadSpongeDatData(WorldInfo info) throws IOException {
+        final File spongeFile = new File(this.worldDirectory, "level_sponge.dat");
+        final File spongeOldFile = new File(this.worldDirectory, "level_sponge.dat_old");
+
+        if (spongeFile.exists() || spongeOldFile.exists()) {
+            final NBTTagCompound compound = CompressedStreamTools.readCompressed(new FileInputStream(spongeFile.exists() ? spongeFile :
+                    spongeOldFile));
+            ((IMixinWorldInfo) info).setSpongeRootLevelNBT(compound);
+            if (compound.hasKey(Sponge.ECOSYSTEM_NAME)) {
+                ((IMixinWorldInfo) info).readSpongeNbt(compound.getCompoundTag(Sponge.ECOSYSTEM_NAME));
             }
-        } catch (IOException ioexception) {
-            ioexception.printStackTrace();
-            throw new MinecraftException("Failed to check session lock for world " + this.worldDirectory + ", aborting");
         }
     }
 
-    @Overwrite
-    @Nullable
-    public WorldInfo loadWorldInfo() {
-        File file1 = new File(this.worldDirectory, "level.dat");
-        File file2 = new File(this.worldDirectory, "level.dat_old");
-        File spongeFile = new File(this.worldDirectory, "level_sponge.dat");
-        File spongeOldFile = new File(this.worldDirectory, "level_sponge.dat_old");
-        NBTTagCompound nbttagcompound;
-        NBTTagCompound nbttagcompound1;
-
-        WorldInfo worldInfo = null;
-
-        // TODO Forge does checks on backup.dat, restore this in Sponge
-//        if (!file1.exists() && file2.exists()) {
-//            net.minecraftforge.fml.common.FMLCommonHandler.instance().confirmBackupLevelDatUse((SaveHandler) (Object) this);
-//        }
-
-        boolean readSpongeData = false;
-        if (file1.exists() || file2.exists()) {
-            try {
-                nbttagcompound = CompressedStreamTools.readCompressed(new FileInputStream(file1.exists() ? file1 : file2));
-                nbttagcompound1 = nbttagcompound.getCompoundTag("Data");
-                worldInfo = new WorldInfo(nbttagcompound1);
-
-                // TODO Sponge code here
-                // TODO Call IDimensionManager loadData (for Vanilla)
-//                // Forge and FML data are only loaded from main world
-//                if (this.worldDirectory.getParentFile() == null
-//                        || (FMLCommonHandler.instance().getSide() == Side.CLIENT && this.worldDirectory.getParentFile().equals(
-//                        FMLCommonHandler.instance().getSavesDirectory()))) {
-//                    net.minecraftforge.fml.common.FMLCommonHandler.instance().handleWorldDataLoad((SaveHandler) (Object) this, worldInfo,
-//                            nbttagcompound);
-//                }
-                readSpongeData = true;
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-
-            if (readSpongeData) {
-                try {
-                    // Check for Sponge data
-                    if (spongeFile.exists() || spongeOldFile.exists()) {
-                        nbttagcompound = CompressedStreamTools.readCompressed(new FileInputStream(spongeFile.exists() ? spongeFile : spongeOldFile));
-                        ((IMixinWorldInfo) worldInfo).setSpongeRootLevelNBT(nbttagcompound);
-                        if (nbttagcompound.hasKey(Sponge.ECOSYSTEM_NAME)) {
-                            NBTTagCompound spongeNbt = nbttagcompound.getCompoundTag(Sponge.ECOSYSTEM_NAME);
-                            ((IMixinWorldInfo) worldInfo).readSpongeNbt(spongeNbt);
-                        }
-                    }
-
-                    return worldInfo;
-                } catch (Exception ex) {
-                    ex.printStackTrace();
-                }
-            }
-        }
-
-        return null;
-    }
-
-    @Overwrite
-    public void saveWorldInfoWithPlayer(WorldInfo worldInformation, NBTTagCompound tagCompound) {
-        NBTTagCompound nbttagcompound1 = worldInformation.cloneNBTCompound(tagCompound);
-        NBTTagCompound nbttagcompound2 = new NBTTagCompound();
-        nbttagcompound2.setTag("Data", nbttagcompound1);
-
-        // TODO Sponge code here
-        // TODO Call IDimensionManager saveData (for Vanilla)
-//        // Forge and FML data are only saved to main world
-//        if (this.worldDirectory.getParentFile() == null
-//                || (FMLCommonHandler.instance().getSide() == Side.CLIENT && this.worldDirectory.getParentFile().equals(
-//                        FMLCommonHandler.instance().getSavesDirectory()))) {
-//            net.minecraftforge.fml.common.FMLCommonHandler.instance().handleWorldDataSave((SaveHandler) (Object) this, worldInformation,
-//                    nbttagcompound2);
-//        }
-
+    private void saveSpongeDatData(WorldInfo info) {
         try {
-            File file1 = new File(this.worldDirectory, "level.dat_new");
-            File file2 = new File(this.worldDirectory, "level.dat_old");
-            File file3 = new File(this.worldDirectory, "level.dat");
-            CompressedStreamTools.writeCompressed(nbttagcompound2, new FileOutputStream(file1));
-
-            if (file2.exists()) {
-                file2.delete();
-            }
-
-            file3.renameTo(file2);
-
-            if (file3.exists()) {
-                file3.delete();
-            }
-
-            file1.renameTo(file3);
-
-            if (file1.exists()) {
-                file1.delete();
-            }
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
-
-        try {
-            File spongeFile1 = new File(this.worldDirectory, "level_sponge.dat_new");
-            File spongeFile2 = new File(this.worldDirectory, "level_sponge.dat_old");
-            File spongeFile3 = new File(this.worldDirectory, "level_sponge.dat");
-            CompressedStreamTools.writeCompressed(((IMixinWorldInfo) worldInformation).getSpongeRootLevelNbt(), new FileOutputStream(spongeFile1));
+            final File spongeFile1 = new File(this.worldDirectory, "level_sponge.dat_new");
+            final File spongeFile2 = new File(this.worldDirectory, "level_sponge.dat_old");
+            final File spongeFile3 = new File(this.worldDirectory, "level_sponge.dat");
+            CompressedStreamTools.writeCompressed(((IMixinWorldInfo) info).getSpongeRootLevelNbt(), new FileOutputStream(spongeFile1));
 
             if (spongeFile2.exists()) {
                 spongeFile2.delete();
@@ -192,75 +130,24 @@ public abstract class MixinSaveHandler {
             if (spongeFile1.exists()) {
                 spongeFile1.delete();
             }
-        } catch (Exception ex) {
-            ex.printStackTrace();
+        } catch (Exception exception) {
+            exception.printStackTrace();
         }
     }
 
-    @Overwrite
-    public void saveWorldInfo(WorldInfo worldInformation) {
-        NBTTagCompound nbttagcompound = worldInformation.getNBTTagCompound();
-        NBTTagCompound nbttagcompound1 = new NBTTagCompound();
-        nbttagcompound1.setTag("Data", nbttagcompound);
-
-        // TODO Sponge code here
-        // TODO Call IDimensionManager saveData (for Vanilla)
-//        // Forge and FML data are only saved to main world
-//        if (this.worldDirectory.getParentFile() == null
-//                || (FMLCommonHandler.instance().getSide() == Side.CLIENT && this.worldDirectory.getParentFile().equals(
-//                        FMLCommonHandler.instance().getSavesDirectory()))) {
-//            net.minecraftforge.fml.common.FMLCommonHandler.instance().handleWorldDataSave((SaveHandler) (Object) this, worldInformation,
-//                    nbttagcompound1);
-//        }
-
-        try {
-            File file1 = new File(this.worldDirectory, "level.dat_new");
-            File file2 = new File(this.worldDirectory, "level.dat_old");
-            File file3 = new File(this.worldDirectory, "level.dat");
-            CompressedStreamTools.writeCompressed(nbttagcompound1, new FileOutputStream(file1));
-
-            if (file2.exists()) {
-                file2.delete();
-            }
-
-            file3.renameTo(file2);
-
-            if (file3.exists()) {
-                file3.delete();
-            }
-
-            file1.renameTo(file3);
-
-            if (file1.exists()) {
-                file1.delete();
-            }
-        } catch (Exception ex) {
-            ex.printStackTrace();
+    private void loadDimensionAndOtherData(SaveHandler handler, WorldInfo info, NBTTagCompound compound) {
+        // Preserve dimension data from Sponge
+        final NBTTagCompound customWorldDataCompound = compound.getCompoundTag("Forge");
+        if (customWorldDataCompound.hasKey("DimensionData")) {
+            DimensionManager.loadDimensionDataMap(customWorldDataCompound.getCompoundTag("DimensionData"));
         }
+    }
 
-        try {
-            File spongeFile1 = new File(this.worldDirectory, "level_sponge.dat_new");
-            File spongeFile2 = new File(this.worldDirectory, "level_sponge.dat_old");
-            File spongeFile3 = new File(this.worldDirectory, "level_sponge.dat");
-            CompressedStreamTools.writeCompressed(((IMixinWorldInfo) worldInformation).getSpongeRootLevelNbt(), new FileOutputStream(spongeFile1));
-
-            if (spongeFile2.exists()) {
-                spongeFile2.delete();
-            }
-
-            spongeFile3.renameTo(spongeFile2);
-
-            if (spongeFile3.exists()) {
-                spongeFile3.delete();
-            }
-
-            spongeFile1.renameTo(spongeFile3);
-
-            if (spongeFile1.exists()) {
-                spongeFile1.delete();
-            }
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
+    private void saveDimensionAndOtherData(SaveHandler handler, WorldInfo info, NBTTagCompound compound) {
+        final NBTTagCompound customWorldDataCompound = new NBTTagCompound();
+        final NBTTagCompound customDimensionDataCompound = DimensionManager.saveDimensionDataMap();
+        customWorldDataCompound.setTag("DimensionData", customDimensionDataCompound);
+        // Share data back to Sponge
+        compound.setTag("Forge", customWorldDataCompound);
     }
 }

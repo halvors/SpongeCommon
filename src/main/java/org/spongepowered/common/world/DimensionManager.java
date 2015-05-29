@@ -1,9 +1,10 @@
 package org.spongepowered.common.world;
 
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.world.WorldProvider;
 
 /**
- * Figure out what to do with this class...
+ * todo World changes...
  */
 public class DimensionManager {
     public static WorldProvider createProviderFor(int dimension) {
@@ -12,5 +13,13 @@ public class DimensionManager {
 
     public static boolean shouldLoadSpawn(int dimension) {
         return true;
+    }
+
+    public static void loadDimensionDataMap(NBTTagCompound compount) {
+
+    }
+
+    public static NBTTagCompound saveDimensionDataMap() {
+        return null;
     }
 }
